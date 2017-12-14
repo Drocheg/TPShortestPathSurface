@@ -1,3 +1,5 @@
+import java.util.ArrayList;
+
 import Jcg.geometry.*;
 import Jcg.polyhedron.*;
 
@@ -118,19 +120,22 @@ public class SurfaceMesh {
 	 * @param s 
 	 * @param renderPathType 
 	 */
-	public void draw(int type, int renderPathType, Vertex<Point_3> s, Vertex<Point_3> d) {
+	public void draw(int type, int renderPathType, Vertex<Point_3> s, Vertex<Point_3> d, ArrayList<Point_3>shortestPath) {
 		//this.drawAxis();
 		
 		// draw all faces
-		view.beginShape(view.TRIANGLES);
-		for(Face<Point_3> f: this.polyhedron3D.facets) {
-				this.drawFace(f);
+		if(renderPathType<=1) {
+			view.beginShape(view.TRIANGLES);
+			for(Face<Point_3> f: this.polyhedron3D.facets) {
+					this.drawFace(f);
+			}
+			view.endShape();
 		}
-		view.endShape();
+		
 		
 		if(type==1) return; // no rendering of edges
 		
-		// draw all edges
+	//	 draw all edges
 		view.strokeWeight(2); // line width (for edges)
 		view.stroke(20);
 		for(Halfedge<Point_3> e: this.polyhedron3D.halfedges) {
@@ -139,6 +144,7 @@ public class SurfaceMesh {
 			
 			this.drawSegment(p, q); // draw edge (p,q)
 		}
+		
 		//view.strokeWeight(1);
 		
 		if(type!=0) {
@@ -150,7 +156,13 @@ public class SurfaceMesh {
 			}
 			view.strokeWeight(1);
 		}
-		if(renderPathType==1) {
+		if(renderPathType>=1) {
+			view.strokeWeight(5); // line width (for edges)
+			view.stroke(20);
+			for(int i=0; i<shortestPath.size()-1; i++) {
+				this.view.stroke(0f,250f,0f,250f);
+				this.drawSegment(shortestPath.get(i), shortestPath.get(i+1));
+			}
 			view.noStroke();
 			this.drawVertex(s.getPoint(),0f,250f,0f);
 			this.drawVertex(d.getPoint(),0f,250f,0f);

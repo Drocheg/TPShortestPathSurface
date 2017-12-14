@@ -18,16 +18,17 @@ public class MeshViewer extends PApplet {
 	int renderType=0; // choice of type of rendering
 	int renderModes=3; // number of rendering modes
 	int renderPathType=0;
-	int renderPathModes=2;
+	int renderPathModes=3;
 	ShortestPathCalculator spc;
 	Vertex s;
 	Vertex d;
+	ArrayList<Point_3> shortesPath;
 	
 //String filename="OFF/high_genus.off";
-	//String filename="OFF/sphere.off";
-	//String filename="OFF/cube.off";
+//	String filename="OFF/sphere.off";
+	String filename="OFF/cube.off";
 //	String filename="OFF/torus_33.off";
-	String filename="OFF/tore.off";
+//	String filename="OFF/tore.off";
 //	String filename="OFF/cow.off";
 	//String filename="OFF/letter_a.off";
 //	String filename="OFF/star.off";
@@ -56,7 +57,7 @@ public class MeshViewer extends PApplet {
 		  this.strokeWeight(1);
 		  stroke(150,150,150);
 		  
-		  this.mesh.draw(renderType, renderPathType, s, d);
+		  this.mesh.draw(renderType, renderPathType, s, d, shortesPath);
 		}
 		
 		public void keyPressed(){
@@ -75,11 +76,42 @@ public class MeshViewer extends PApplet {
 				randomNum2 = ThreadLocalRandom.current().nextInt(0, vertices.size());
 			}while(randomNum2==randomNum);
 			
+			
 			//TODO delete:
+			//  10 - 28 for error in calculation
 			//randomNum = 34;
 			//randomNum2 = 37;
-			randomNum = 30;
-			randomNum2 = 3;
+			//randomNum = 30;
+			//randomNum2 = 3;
+			// the dream negative number result: 30 - 42
+			
+			//for the star: 2 - 7 4 iteration.
+			
+			//randomNum = 2;
+			//randomNum2 = 7;
+			//randomNum = 0;
+			//randomNum2 = 6;
+			
+			// 9 - 2
+			//randomNum = 9; 
+			//randomNum2 = 2;
+			// error weird in bound 40 iteration 13 - 12
+//			randomNum = 13;
+//			randomNum2 = 12; 
+			
+
+			// BUG of back CUBE: 0 - 6 (maybe the dijkstra bug)
+			// BUG SPHERE :  154 - 59
+			// SPHERE: 87 - 113
+			
+			// 130 - 82
+			// 33 - 31
+			
+//			randomNum = 16;
+//			randomNum2 = 40; 
+			
+//			randomNum = 87;
+//			randomNum2 = 113;
 			
 			Vertex<Point_3> vSource = vertices.get(randomNum);
 			Vertex<Point_3> vDestination =  vertices.get(randomNum2);
@@ -88,8 +120,18 @@ public class MeshViewer extends PApplet {
 			s = vSource;
 			d = vDestination;
 			renderType = 3;
-			
-			spc.calculatesShortestPath(vSource, vDestination);
+			renderPathType = 2;
+			ArrayList<Point_3> listOfPoints = new ArrayList<>();
+			listOfPoints.add(vSource.getPoint());
+			listOfPoints.add(vDestination.getPoint());
+			try {
+				listOfPoints = spc.calculatesShortestPath(vSource, vDestination);
+			} catch (Exception e) {
+				System.out.println("using " + randomNum + "and " + randomNum2);
+				System.err.println(e.getMessage());
+				System.err.println(e.getStackTrace());
+			}
+			shortesPath = listOfPoints;
 		}
 
 		// TODO delete

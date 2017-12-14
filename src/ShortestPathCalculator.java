@@ -1,3 +1,5 @@
+import java.util.ArrayList;
+
 import Jcg.geometry.Point_3;
 import Jcg.polyhedron.Polyhedron_3;
 import Jcg.polyhedron.Vertex;
@@ -17,7 +19,7 @@ public abstract class ShortestPathCalculator {
 	/**
 	 * The main method calculating the shortest path between two vertices.
 	 */
-	public abstract void calculatesShortestPath(Vertex<Point_3> source, Vertex<Point_3> destination);
+	public abstract ArrayList<Point_3> calculatesShortestPath(Vertex<Point_3> source, Vertex<Point_3> destination);
 
 	/**
 	 * The method that calculates the shortestPath but only returns shortestDistance

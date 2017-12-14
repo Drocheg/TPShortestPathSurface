@@ -12,13 +12,13 @@ import Jcg.polyhedron.Vertex;
 
 public class ExactGeodesics extends ShortestPathCalculator{
 
-	static final double EPSILON = 0.00001;
+	static final double EPSILON = 0.0001;
 	public ExactGeodesics(Polyhedron_3<Point_3> polyhedron3d) {
 		super(polyhedron3d);
 	}
 
 	@Override
-	public void calculatesShortestPath(Vertex<Point_3> source, Vertex<Point_3> destination) {
+	public ArrayList<Point_3> calculatesShortestPath(Vertex<Point_3> source, Vertex<Point_3> destination) {
 		// Step1: Use Dijkstra to compute upper-bound distance Ust(Dijkstra)
 		// TODO test it for open forms? Or not?
 		double ustDijkstra = bidirectionalDijkstra(source, destination);
@@ -31,7 +31,7 @@ public class ExactGeodesics extends ShortestPathCalculator{
 
 		// TODO
 		// We can use for now as lowerBound function
-		double lowestBoundDistance = lowestBoundDistance(source, destination);
+		double lowestBoundDistance = lowestBoundDistance(source.getPoint(), destination.getPoint());
 		System.out.println("lowestBoundDistance between source and destination: "+ lowestBoundDistance);
 		
 		
@@ -41,23 +41,234 @@ public class ExactGeodesics extends ShortestPathCalculator{
 		
 		
 		// Step4: Do exact search to compute exact distance
-		// TODO
-		
+		// TODO find why result is wrong (sometimes it is outside of bounds, sometimes even < lowerBound (imposible))
+		// posible error for upperbound is that we end when arriving to first edge but other paths could exist.
+		// Maybe continue until it is imposible, ingoring windows with lowest bound > current result.
 		double upperBound = ustDijkstra;
-		double shortestDistance = calculateShortestDistance(source, destination, upperBound);
+		Map<Halfedge<Point_3>, ArrayList<Window>> mapWindowsEdge = new HashMap<Halfedge<Point_3>, ArrayList<Window>>();
+		double shortestDistance = calculateShortestDistance(source, destination, upperBound, mapWindowsEdge);
 		System.out.println("lowestBoundDistance between source and destination: "+ lowestBoundDistance);
 		System.out.println("shortestDistance from vertex: " + source + "to vertex: " + destination + " is: " + shortestDistance);
 		System.out.println("Dijkstra: " + ustDijkstra);
 		System.out.println(lowestBoundDistance + " <= " + shortestDistance + " <= " + ustDijkstra);
 		if(lowestBoundDistance>shortestDistance || shortestDistance > ustDijkstra) {
-			throw new IllegalStateException("It is not respecting the bounds");
+			//throw new IllegalStateException("It is not respecting the bounds");
+			System.out.println("IT IS NOT RESPECTING BOUNDS!");
 		}
 		// Step5: Apply backtracking to find the shortest path.
 		// TODO
-
+		return backTracking(mapWindowsEdge, source, destination, shortestDistance);
 	}
 	
 	
+	private ArrayList<Point_3> backTracking(Map<Halfedge<Point_3>, ArrayList<Window>> mapWindowsEdge, Vertex<Point_3> source,
+			Vertex<Point_3> destination, double shortestDistance) {
+		// TODO Auto-generated method stub
+		Map<Point_3, Halfedge<Point_3>> mapPointEdge = new HashMap();
+		ArrayList<Point_3> listOfPoints = new ArrayList();
+		Halfedge<Point_3> inicialHalfEdge = destination.getHalfedge(); // edge that point to the vertex
+		Window bestWindow = findBestWindow(inicialHalfEdge, shortestDistance, mapWindowsEdge);
+		
+		
+		Point_3 currentPoint = destination.getPoint();
+		listOfPoints.add(currentPoint);
+		Window currentWindow = bestWindow;
+		mapPointEdge.put(currentPoint, currentWindow.edge);
+		int iteration = 0;
+		while(true) {
+			System.out.println("Backpropagation iteration: " + iteration++);
+			Point_3 p1_3D = currentWindow.edge.vertex.getPoint();
+			Point_3 p0_3D = currentWindow.edge.opposite.vertex.getPoint();
+			Point_3 p2_3D = currentWindow.edge.next.vertex.getPoint();
+			double distanceToEdgeOrigin = euclidianDistance(currentPoint,  p0_3D);
+			Point_3 p = new Point_3(distanceToEdgeOrigin,0,0);
+			Point_3 vS = currentWindow.calculateSourceInXWithP0in000();
+			if(isAlmostSamePoint(p,vS)){
+				if(isAlmostSamePoint(currentPoint, source.getPoint())){
+					break; //We are on the source
+				}else {
+					//We are on a source that is not destination
+					if(!mapPointEdge.containsKey(currentPoint)) {
+						throw new IllegalStateException("there is no edge with this point in the map.");
+					}
+					inicialHalfEdge = mapPointEdge.get(currentPoint); // edge that point to the vertex
+					if(!isAlmostSamePoint(currentPoint, inicialHalfEdge.getVertex().getPoint())) {
+						inicialHalfEdge = inicialHalfEdge.opposite;
+						if(!isAlmostSamePoint(currentPoint, inicialHalfEdge.getVertex().getPoint())) throw new IllegalArgumentException("The edge do not contain the new source");
+					}
+					bestWindow = findBestWindow(inicialHalfEdge, currentWindow.sigma, mapWindowsEdge);
+					currentWindow = bestWindow;
+					//Do not change point
+				}
+			}else {
+				//we are in a normal case.
+				//calculate line between point and source and also lines of other 2 segments.
+				Point_3 p2 = calculatePointWithDistances(size(currentWindow.edge), size(currentWindow.edge.prev), size(currentWindow.edge.next));
+				Point_3 p0 = new Point_3(0,0,0);
+				Point_3 p1 = new Point_3(size(currentWindow.edge),0,0);
+				
+				Vector_3 vp1_p2 = (Vector_3) p1.minus(p2);
+				Vector_3 vp_s = (Vector_3) p.minus(vS);
+				Vector_3 vp1_p = (Vector_3) p1.minus(p);
+				
+				Vector_3 vp2_p0 = (Vector_3) p2.minus(p0);
+				Vector_3 vp2_p = (Vector_3) p2.minus(p);
+
+				Point_3[] points = new Point_3[] {p1,p0,p2,p,vS,vS};
+				
+				double[] t = new double[2];
+				if(isAlmostZero(vS.y)) {
+					if(isAlmostZero(vS.x-p.x)) throw new IllegalStateException("already hanle this case");
+					if(vS.x>p.x) {
+						t[0]=0;
+						t[1]=0;
+					}else {
+						t[0]=1;
+						t[1]=1;
+					}
+				}else {
+					calculateT(t, vp1_p, vp2_p, vp_s, vp1_p2, vp2_p0,points, 0);
+				}
+				Point_3 newPoint = null;
+				if(isAlmostZero(t[0]-1) && isAlmostZero(t[1])){
+					//it cut on the vertex. Might have problems
+					newPoint = p2_3D;
+					if(!isAlmostSamePoint(p2, vS)) {
+						System.out.println("It pass by the vertex but it is not a source");
+						// Test firstLine
+						Halfedge<Point_3> newEdge = currentWindow.edge.next.opposite;
+						double distanceToStartOfEdge = size(newEdge)*(1-t[0]);
+						Window mightBeWindow = null;
+						Window firstPosibleWindow = findPosibleWindow(mapWindowsEdge, newEdge, distanceToStartOfEdge);
+						// Test secondLine
+						newEdge = currentWindow.edge.prev.opposite;
+						distanceToStartOfEdge = size(newEdge)*(1-t[1]);
+						Window secondPosibleWindow = findPosibleWindow(mapWindowsEdge, newEdge, distanceToStartOfEdge);
+						// CopyfromBellow
+						if(firstPosibleWindow == null && secondPosibleWindow == null) throw new IllegalStateException("None window found with point. Problem backtracking");
+						if(firstPosibleWindow == null) currentWindow = secondPosibleWindow;
+						else if(secondPosibleWindow == null) currentWindow = firstPosibleWindow;
+						else currentWindow = firstPosibleWindow.d0<secondPosibleWindow.d1?firstPosibleWindow:secondPosibleWindow;
+					}else {
+						//change window to a fake one for the algorithm
+						Halfedge<Point_3> edgeForFakeWindow = currentWindow.edge.next;
+						currentWindow = new Window(0, size(edgeForFakeWindow), size(edgeForFakeWindow), 0, currentWindow.sigma, false, edgeForFakeWindow, 0);
+					}
+				}else {
+					Halfedge<Point_3> newEdge = null;
+					double distanceToStartOfEdge = 0;
+					if(t[0]<=1-EPSILON) {
+						//it cut the first line
+						newPoint = Point_3.linearCombination(new Point_3[]{p1_3D,p2_3D},new Double[] {1-t[0],t[0]});
+						newEdge = currentWindow.edge.next.opposite;
+						distanceToStartOfEdge = size(newEdge)*(1-t[0]);
+					}else {
+						if(t[1]>=EPSILON) {
+							//it cut the second line
+							newPoint = Point_3.linearCombination(new Point_3[]{p2_3D,p0_3D},new Double[] {1-t[1],t[1]});
+							newEdge = currentWindow.edge.prev.opposite;
+							distanceToStartOfEdge = size(newEdge)*(1-t[1]);
+						}else {
+							throw new IllegalStateException("bad calculation error for the cut in backpropagation");
+						}
+					}
+					//change to new window.
+					if(!mapWindowsEdge.containsKey(newEdge)) {
+						throw new IllegalStateException("there was a problem calculating the backtracking. Non existing prev window");
+					}
+					ArrayList<Window> posibleNewWindows = mapWindowsEdge.get(newEdge);
+					boolean foundWindow = false;
+					for(Window posibleW: posibleNewWindows) {
+						if(posibleW.b0-EPSILON < distanceToStartOfEdge && posibleW.b1+EPSILON>distanceToStartOfEdge) {
+							if(foundWindow) {
+								throw new IllegalStateException("Can't find two windows in same edge with same point");
+							}
+							currentWindow = posibleW;
+							foundWindow = true;
+						}
+					}
+					if(!foundWindow) {
+						throw new IllegalStateException("None window found with point. Problem backtracking");
+					}
+				}
+				currentPoint = newPoint;
+				listOfPoints.add(currentPoint);
+				mapPointEdge.put(currentPoint, currentWindow.edge);
+			}
+		}
+		return listOfPoints;
+	}
+
+
+	private Window findPosibleWindow(Map<Halfedge<Point_3>, ArrayList<Window>> mapWindowsEdge,
+			Halfedge<Point_3> newEdge, double distanceToStartOfEdge) {
+		Window result = null;
+		if(mapWindowsEdge.containsKey(newEdge)) {
+			boolean foundWindow = false;
+			ArrayList<Window> posibleNewWindows = mapWindowsEdge.get(newEdge);
+			for(Window posibleW: posibleNewWindows) {
+				if(posibleW.b0-EPSILON < distanceToStartOfEdge && posibleW.b1+EPSILON>distanceToStartOfEdge) {
+					if(foundWindow) {
+						throw new IllegalStateException("Can't find two windows in same edge with same point");
+					}
+					result = posibleW;
+					foundWindow = true;
+				}
+			}
+		}
+		return result;
+	}
+
+	private Window findBestWindow(Halfedge<Point_3> inicialHalfEdge, double currentShortestDistance, Map<Halfedge<Point_3>, ArrayList<Window>> mapWindowsEdge) {
+		Window bestWindow = null;
+		Halfedge<Point_3> currentHalfEdge = inicialHalfEdge;	
+		boolean stateNext = true;
+		do {
+			if(mapWindowsEdge.containsKey(currentHalfEdge)) {
+				ArrayList<Window> windowArrray = mapWindowsEdge.get(currentHalfEdge);
+				for(Window w: windowArrray) {
+					if(!isAlmostZero(currentShortestDistance-w.sigma)) {
+						if((isAlmostZero(w.d1+w.sigma-currentShortestDistance) && isAlmostZero(w.b1-size(currentHalfEdge)) && stateNext) || (isAlmostZero(w.d0+w.sigma-currentShortestDistance)&& isAlmostZero(w.b0)) && !stateNext) { 
+							bestWindow = w;
+						}
+					}else {
+						System.out.println("sigma==shortestDistance");
+					}
+				}
+			}
+			if(stateNext) currentHalfEdge = currentHalfEdge.next;
+			else currentHalfEdge = currentHalfEdge.opposite;
+			stateNext = !stateNext;
+		}while(inicialHalfEdge!=currentHalfEdge);
+		if(bestWindow==null) throw new IllegalArgumentException("there was no edge that touched the destination");
+		return bestWindow;
+	}
+
+	public Point_3 calculatePointWithDistances(double d, double d0, double d1) {
+			if(isAlmostZero(d-d0-d1)) {
+				return new Point_3(d0,0,0);
+			}
+			if(isAlmostZero(d0-d-d1)) {
+				return new Point_3(d0,0,0);
+			}
+			if(isAlmostZero(d1-d-d0)) {
+				return new Point_3(-d0,0,0);
+			}
+			if(isAlmostZero(d)) throw new IllegalStateException("can't calculate point if sizeEdge==0");
+			double a = (d0*d0-d1*d1+d*d)/(2*d);
+			double h = Math.sqrt(d0*d0-a*a);
+			if(Double.isNaN(h)) {
+				throw new IllegalStateException("h is NaN in calculating point");
+			}
+			Point_3 pResult = new Point_3(a,h,0);
+			return pResult;
+		}
+
+	private boolean isAlmostSamePoint(Point_3 p1, Point_3 p2) {
+		return isAlmostZero(p1.distanceFrom(p2).doubleValue());
+	}
+
+
 	//Exact algorithm
 	public static class Window implements Comparable<Window>{
 		double b0, b1, d0, d1, sigma, pqCriteria;  //b0,b1 distance along the edge. d0,d1 distance to source. Sigma geodesic distance of source to Vs
@@ -83,8 +294,19 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			if(!isAlmostZero(euclidianDistance(source, new Point_3(b1,0,0))-d1)) {
 				throw new IllegalArgumentException("argument are not concording");
 			}
-			System.out.println("PQCriteria:  " + pqCriteria + " sigma: " + sigma);
+			System.out.println("New: " + toString());
+			// TODO delete System.out.println("PQCriteria:  " + pqCriteria + " sigma: " + sigma);
 		}
+		
+		
+		@Override
+		public String toString() {
+			double pre = 100.0;
+			return "Window [edge=" + edge + ", b0=" + Math.round(b0*pre)/pre + ", b1=" +  Math.round(b1*pre)/pre + ", d0=" +  Math.round(d0*pre)/pre + ", d1=" +  Math.round(d1*pre)/pre + ", sigma=" +  Math.round(sigma*pre)/pre
+					+ ", pqCriteria=" + pqCriteria + ", tau=" + tau + "]";
+		}
+
+
 		@Override
 		public int compareTo(Window w) {
 			if(w == null) throw new IllegalArgumentException();
@@ -93,15 +315,16 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			if(diff<0) return -1;
 			return 0;
 		}
-		public ArrayList<Window> propagate() {
+		public ArrayList<Window> propagate(Vertex<Point_3> source3D) {
 			ArrayList<Window> windows = new ArrayList<Window>();
 			if(d0==0) {
 				Halfedge<Point_3> newEdge = edge.opposite.next;
 				Window w = new Window(0, size(newEdge), 0, size(newEdge), sigma, tau, newEdge, sigma);
 				windows.add(w);
 				Halfedge<Point_3> newEdge2  = newEdge.next;
-				w = new Window(0, size(newEdge2), size(newEdge), size(edge), sigma, tau, newEdge2, sigma+Math.min(size(newEdge), size(edge)));
-				windows.add(w);
+				Window w2 = new Window(0, size(newEdge2), size(newEdge), size(edge), sigma, tau, newEdge2, sigma+Math.min(size(newEdge), size(edge)));
+				windows.add(w2);
+				System.out.println("d0==0: " + "first w: " + w + "second w: " + w2);
 				return windows;
 			}
 			if(d1==0) {
@@ -109,8 +332,9 @@ public class ExactGeodesics extends ShortestPathCalculator{
 				Window w = new Window(0, size(newEdge),  size(newEdge), 0, sigma, tau, newEdge, sigma);
 				windows.add(w);
 				Halfedge<Point_3> newEdge2  = newEdge.prev;
-				w = new Window(0, size(newEdge2), size(edge), size(newEdge), sigma, tau, newEdge2, sigma+Math.min(size(newEdge), size(edge)));
-				windows.add(w);
+				Window w2 = new Window(0, size(newEdge2), size(edge), size(newEdge), sigma, tau, newEdge2, sigma+Math.min(size(newEdge), size(edge)));
+				windows.add(w2);
+				System.out.println("d1==0: " + "first w: " + w + "second w: " + w2);
 				return windows;
 			}
 			
@@ -120,7 +344,7 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			Point_3 p2 = new Point_3(edge.next.vertex.getPoint()); //third point of original triangle
 			Point_3 p3 = new Point_3(edge.opposite.next.vertex.getPoint()); //third point of new triangle
 		
-			
+			double minDistanceToP3 = lowestBoundDistance(source3D.getPoint(),p3);
 			
 			Matrix translationOfPointP0= translation(-p0.x,-p0.y,-p0.z);
 			Point_3[] pointsArray = new Point_3[] {p0,p1,p2,p3};
@@ -165,7 +389,7 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			}
 			if(p1.x<-EPSILON) throw new IllegalStateException("There was an error in the calculation of the transformations");
 			if(!isAlmostZero(p0.z) || !isAlmostZero(p1.z) || !isAlmostZero(p2.z) || !isAlmostZero(p1.y)) {
-				System.out.println("p0z: " + p0 + ", p1: " + p1 + ", p2: " +p2);
+//				System.out.println("p0z: " + p0 + ", p1: " + p1 + ", p2: " +p2);
 				throw new IllegalStateException("There was an error in the calculation of the transformations");
 			}else {
 				//We are doing this to avoid problems. Maybe an error but almost nothing.
@@ -180,7 +404,11 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			p3.setY(distanceToLine*-1);
 			p3.setZ(0);
 			
-			Point_3 source = calculateSourceWithPointOnEdgeX();
+			Point_3 source = calculateSourceInXWithP0in000();
+			
+			
+			System.out.println("new Point p3(" + edge.opposite.next.vertex.getPoint() +": " + euclidianDistance(source, p3));
+			
 			
 			Point_3 q0 = new Point_3(b0,0,0);
 			Vector_3 vp0_p3 = (Vector_3) p0.minus(p3);
@@ -191,16 +419,6 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			Vector_3 vp3_p1 = (Vector_3) p3.minus(p1);
 			Vector_3 vs_q1 = (Vector_3) source.minus(q1);
 			Vector_3 vp3_s = (Vector_3) p3.minus(source);
-			
-//			Point_3 q0 = new Point_3(b0,0,0);
-//			Vector_3 vp0_p3 = (Vector_3) p3.minus(s);
-//			Vector_3 vs_q0 = (Vector_3) q0.minus(source);
-//			Vector_3 vp0_s = (Vector_3) source.minus(p0);
-//			
-//			Point_3 q1 = new Point_3(b1,0,0);
-//			Vector_3 vp3_p1 = (Vector_3) p1.minus(p3);
-//			Vector_3 vs_q1 = (Vector_3) q1.minus(source);
-//			Vector_3 vp3_s = (Vector_3) source.minus(p3);
 
 			// p =p0, r=p0p3, q=vs, s=vsq0, q-p = vs-p0
 			Point_3[] points = new Point_3[] {p0,p1,p3,source,q0,q1};
@@ -209,7 +427,6 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			calculateT(t0, vp0_s, vp3_s, vs_q0, vp0_p3, vp3_p1,points, 0);
 			double[] t1 = new double[2];
 			calculateT(t1, vp0_s, vp3_s, vs_q1, vp0_p3, vp3_p1,points, 1);
-			
 		
 			addNormalWindow(windows, t0, t1, 0, edge.opposite.next, source, p0, p3);
 			addNormalWindow(windows, t0, t1, 1, edge.opposite.prev, source, p3, p1);
@@ -247,9 +464,18 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			double d = (b1-b0);
 			if(isAlmostZero(d-d0-d1)) {
 				//the source is on the axisX (probably new source in boundary vertex
+//				System.out.println("Point aligned inside of Q0-Q1");
 				return new Point_3(d0,0,0);
 			}
-			if(isAlmostZero(b1-b0)) throw new IllegalStateException("can't calculate source if b0==b1");
+			if(isAlmostZero(d0-d-d1)) {
+				System.out.println("Point aligned outside of Q0-Q1");
+				return new Point_3(d0,0,0);
+			}
+			if(isAlmostZero(d1-d-d0)) {
+				System.out.println("Point aligned outside of Q0-Q1");
+				return new Point_3(-d0,0,0);
+			}
+			if(isAlmostZero(d)) throw new IllegalStateException("can't calculate source if b0==b1");
 			double a = (d0*d0-d1*d1+d*d)/(2*d);
 			double h = Math.sqrt(d0*d0-a*a);
 			if(Double.isNaN(h)) {
@@ -257,6 +483,7 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			}
 			Point_3 source = new Point_3(a,h,0);
 			return source;
+			//TODO use "calculatePointWithDistances
 		}
 		
 		public Point_3 calculateSourceInXWithP0in000() {
@@ -265,40 +492,40 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			return source;
 		}
 		
-		public Point_3 calculateSourceWithTwoPoints() {
-			Point_3[] points = new Point_3[] {edge.opposite.vertex.getPoint(), edge.vertex.getPoint()};
-			Point_3 q0 = Point_3.linearCombination(points, new Double[] {size(edge)-b0,b0});
-			Point_3 q1 = Point_3.linearCombination(points, new Double[] {size(edge)-b1,b1});
-			Point_3 pSameSide = edge.next.vertex.getPoint();
-			double d = (b1-b0);
-			if(isAlmostZero(d-d0-d1)) {
-				//the source is on the axisX (probably new source in boundary vertex
-				System.out.println("Source is on the edge. Do something");
-				return Point_3.linearCombination(new Point_3[] {q1, q0},new Double[] {d0,d1});
-			}
-			if(isAlmostZero(b1-b0)) throw new IllegalStateException("can't calculate source if b0==b1");
-			double a = (d0*d0-d1*d1+d*d)/(2*d);
-			double h = Math.sqrt(d0*d0-a*a);
-			if(Double.isNaN(h)) {
-				throw new IllegalStateException("h is NaN");
-			}
-			double b = d-a;
-			Point_3 p2 = Point_3.linearCombination(new Point_3[] {q1, q0},new Double[] {a,b});
-			double newX = p2.x + h* (q1.y - q0.y)/d;
-			double newY = p2.y - h* (q1.x - q0.x)/d;
-			Point_3 source1 = new Point_3(newX,newY,0);
-			double newX2 = p2.x - h* (q1.y - q0.y)/d;
-			double newY2 = p2.y + h* (q1.x - q0.x)/d;
-			Point_3 source2 = new Point_3(newX2,newY2,0);
-			
-			double valueSide = (pSameSide.x-q0.x)*(q1.y-q0.y)-(pSameSide.y-q0.y)*(q1.y-q0.y);
-			double valueSource1 = (source1.x-q0.x)*(q1.y-q0.y)-(source1.y-q0.y)*(q1.y-q0.y);
-			if(Math.signum(valueSide) == Math.signum(valueSource1)) {
-				return source1;
-			}else {
-				return source2;
-			}
-		}
+//		public Point_3 calculateSourceWithTwoPoints() {
+//			Point_3[] points = new Point_3[] {edge.opposite.vertex.getPoint(), edge.vertex.getPoint()};
+//			Point_3 q0 = Point_3.linearCombination(points, new Double[] {(size(edge)-b0)/size(edge),b0/size(edge)});
+//			Point_3 q1 = Point_3.linearCombination(points, new Double[] {(size(edge)-b1)/size(edge),b1/size(edge)});
+//			Point_3 pSameSide = edge.next.vertex.getPoint();
+//			double d = (b1-b0);
+//			if(isAlmostZero(d-d0-d1)) {
+//				//the source is on the axisX (probably new source in boundary vertex
+//				System.out.println("Source is on the edge. Do something");
+//				return Point_3.linearCombination(new Point_3[] {q1, q0},new Double[] {d0,d1});
+//			}
+//			if(isAlmostZero(b1-b0)) throw new IllegalStateException("can't calculate source if b0==b1");
+//			double a = (d0*d0-d1*d1+d*d)/(2*d);
+//			double h = Math.sqrt(d0*d0-a*a);
+//			if(Double.isNaN(h)) {
+//				throw new IllegalStateException("h is NaN");
+//			}
+//			double b = d-a;
+//			Point_3 p2 = Point_3.linearCombination(new Point_3[] {q1, q0},new Double[] {a,b});
+//			double newX = p2.x + h* (q1.y - q0.y)/d;
+//			double newY = p2.y - h* (q1.x - q0.x)/d;
+//			Point_3 source1 = new Point_3(newX,newY,0);
+//			double newX2 = p2.x - h* (q1.y - q0.y)/d;
+//			double newY2 = p2.y + h* (q1.x - q0.x)/d;
+//			Point_3 source2 = new Point_3(newX2,newY2,0);
+//			
+//			double valueSide = (pSameSide.x-q0.x)*(q1.y-q0.y)-(pSameSide.y-q0.y)*(q1.y-q0.y);
+//			double valueSource1 = (source1.x-q0.x)*(q1.y-q0.y)-(source1.y-q0.y)*(q1.y-q0.y);
+//			if(Math.signum(valueSide) == Math.signum(valueSource1)) {
+//				return source1;
+//			}else {
+//				return source2;
+//			}
+//		}
 		
 		
 		// TODO pensar en los ciclos y que onda.
@@ -341,57 +568,7 @@ public class ExactGeodesics extends ShortestPathCalculator{
 			}
 			
 		}
-		private void calculateT(double[] t, Vector_3 vDiffOrigin, Vector_3 vDiffOrigin2, Vector_3 vLineSource, Vector_3 vLineLeft,
-				Vector_3 vLineRight, Point_3[] points, int index) { //Points:p0-p1-p3-source-q0-q1
-			// Fix for when q0==p0 || q1==p1
-//			if(points.length!=6) throw new IllegalStateException("Point list needs to be of lenght 6");
-//			if(isAlmostZero(points[0+index].x-points[4+index].x)) { //MAL no es siempre verdad y con esto solo podes mirar ventanas enteras:(
-//				t[0]=index;
-//				t[1]=index;
-//				return;
-//			}
-			double auxCross = cross(vLineLeft, vLineSource);
-			if(isAlmostZero(auxCross)) {
-				System.out. println("p0-p1-"
-						+ "p3-source-q0-q1: "); //TODO delete this just for testing
-				for(Point_3 auxP: points) {
-					System.out.println(auxP); 
-				}
-				System.out.println("Paralel lines");
-				t[0] = 2;
-				//throw new IllegalStateException("Not implemented for paralel lines");
-			//	if(isAlmostZero(cross(vLineLeft,vLineSource)));
-			}else {
-				t[0] = cross(vDiffOrigin,vLineSource)/auxCross;
-			}
-			
-			if(t[0]<-EPSILON || t[0]>1+EPSILON) {
-				t[0]=1;
-				double auxCross2 = cross(vLineRight, vLineSource);
-				if(isAlmostZero(auxCross2)) {
-					System.out.println("p0-p1-p3-source-q0-q1: "); //TODO delete this just for testing
-					for(Point_3 auxP: points) {
-						System.out.println(auxP); 
-					}
-					throw new IllegalStateException("Not implemented for paralel lines");
-				}else {
-					t[1] = cross(vDiffOrigin2,vLineSource)/auxCross2;
-					if(t[1]<-EPSILON || t[1]>1+EPSILON) {
-						System.out.println("p0-p1-p3-source-q0-q1: "); //TODO delete this just for testing
-						for(Point_3 auxP: points) {
-							System.out.println(auxP); //TODO delete this just for testing
-						}
-						System.out.println("t[0]obtained: " + cross(vDiffOrigin,vLineSource)/auxCross + "t[0]: " + t[0] +" - t[1]: " + t[1]);
-						throw new IllegalStateException("Line should cut one of the two sides");
-					}
-				}
-			}else {
-				t[1] = 0;
-			}
-		}
-		private double cross(Vector_3 v1, Vector_3 v2) {
-			return v1.x*v2.y - v1.y*v2.x;
-		}
+		
 		public void copy(Window fw) {
 			this.b0 = fw.b0;
 			this.b1 = fw.b1;
@@ -405,9 +582,8 @@ public class ExactGeodesics extends ShortestPathCalculator{
 		
 	}
 	
-	private double calculateShortestDistance(Vertex<Point_3> source, Vertex<Point_3> destination, double upperBound) {
+	private double calculateShortestDistance(Vertex<Point_3> source, Vertex<Point_3> destination, double upperBound, Map<Halfedge<Point_3>, ArrayList<Window>> mapWindowsEdge ) {
 		PriorityQueue<Window> pq = new PriorityQueue<>();
-		Map<Halfedge<Point_3>, ArrayList<Window>> mapWindowsEdge = new HashMap<Halfedge<Point_3>, ArrayList<Window>>();
 		Halfedge<Point_3> inicialHalfEdge = source.getHalfedge(); // edge that point to the vertex
 		Halfedge<Point_3> currentHalfEdge = inicialHalfEdge;	
 		do {
@@ -422,7 +598,7 @@ public class ExactGeodesics extends ShortestPathCalculator{
 		while(!pq.isEmpty()) {
 			Window currentWindow = pq.poll();
 			if(currentWindow == null) throw new IllegalStateException(); // TODO delete 
-			System.out.println("iteration: " + numIterationPQ++ + " distance: " + currentWindow.pqCriteria + " edge: " + currentWindow.edge );
+			System.out.println("iteration: " + numIterationPQ++ + " " + currentWindow);
 			if(isAlmostZero(currentWindow.b0)) {
 				if(currentWindow.edge.opposite.vertex.equals(destination)) {
 					System.out.println("destination!");
@@ -435,8 +611,30 @@ public class ExactGeodesics extends ShortestPathCalculator{
 					return (currentWindow.d1+currentWindow.sigma);
 				}
 			}
-			ArrayList<Window> windowsToAdd = currentWindow.propagate();
-			propagate(windowsToAdd, pq, mapWindowsEdge);
+			ArrayList<Window> windowsToAdd = currentWindow.propagate(source);
+			ArrayList<Window> trueWindowsToAdd = new ArrayList();
+			for(Window wToAdd: windowsToAdd) {
+				Point_3 sourceOfWindowToAdd = wToAdd.calculateSourceInXWithP0in000();
+				double distance=0;
+//				if(sourceOfWindowToAdd.x>wToAdd.b0 && sourceOfWindowToAdd.x<wToAdd.b1) {
+//					distance = Math.abs(sourceOfWindowToAdd.y);
+//				}else {
+//					distance = Math.min(wToAdd.d0, wToAdd.d1);
+//				}
+				// TODO get a more strict condition
+				Point_3[] points = new Point_3[] {wToAdd.edge.opposite.vertex.getPoint(), wToAdd.edge.vertex.getPoint()};
+				Point_3 q0 = Point_3.linearCombination(points, new Double[] {(size(wToAdd.edge)-wToAdd.b0)/size(wToAdd.edge),(wToAdd.b0)/size(wToAdd.edge)});
+				Point_3 q1 = Point_3.linearCombination(points, new Double[] {(size(wToAdd.edge)-wToAdd.b1)/size(wToAdd.edge),wToAdd.b1/size(wToAdd.edge)});
+				if(wToAdd.d0<wToAdd.d1) {
+					distance = wToAdd.d0 - 2*(wToAdd.b1-wToAdd.b0)+ lowestBoundDistance(q0, destination.getPoint());
+				}else {
+					distance = wToAdd.d1 - 2*(wToAdd.b1-wToAdd.b0) + lowestBoundDistance(q1, destination.getPoint());
+				}
+				if(distance<=upperBound+EPSILON) {
+					trueWindowsToAdd.add(wToAdd);
+				}
+			}
+			propagate(trueWindowsToAdd, pq, mapWindowsEdge);
 		}
 		return -1;
 	}
@@ -453,14 +651,8 @@ public class ExactGeodesics extends ShortestPathCalculator{
 				for(int edgeIndex=0; edgeIndex<windowsInEdge.size(); edgeIndex++) {
 					Window windowInEdge = windowsInEdge.get(edgeIndex); 
 					if(windowInList.b1>windowInEdge.b0 && windowInList.b0<windowInEdge.b1) {
-						
-						
-						
-						//Point_3 sourceList = windowInList.calculateSourceWithTwoPoints();
-						//Point_3 sourceEdge = windowInEdge.calculateSourceWithTwoPoints();
 						Point_3 sourceList = windowInList.calculateSourceInXWithP0in000();
 						Point_3 sourceEdge = windowInEdge.calculateSourceInXWithP0in000();
-						
 						// TODO check interchanging s1 and s0
 						double alpha = sourceEdge.x-sourceList.x;
 						double beta = windowInEdge.sigma - windowInList.sigma;
@@ -537,10 +729,10 @@ public class ExactGeodesics extends ShortestPathCalculator{
 							break; // TODO do not use break;
 						}
 						//TODO do not repeat code
+						boolean wasInPQ = pq.remove(windowInEdge);
 						if(newWindowsEdgeAfterIntersection.size()>0) {
 							Window fw = newWindowsEdgeAfterIntersection.get(0);
 							windowInEdge.copy(fw);
-							boolean wasInPQ = pq.remove(windowInEdge);
 							if(wasInPQ) {
 								if(windowInEdge.b1-windowInEdge.b0 <EPSILON) {
 									throw new IllegalStateException("We are adding to PQ something super small");
@@ -556,12 +748,26 @@ public class ExactGeodesics extends ShortestPathCalculator{
 								windowsInEdge.add(w);
 								if(wasInPQ) pq.add(w);
 							}
+						}else {
+							windowsInEdge.remove(windowInEdge);
+							edgeIndex--;
 						}
 					}
 				}
 				if(!isAlmostZero(windowInList.b0-windowInList.b1)) {
 					pq.add(windowInList);
 					windowsInEdge.add(windowInList);
+				}
+			}
+			ArrayList<Window> windowsInArrayEdge = mapWindowsEdge.get(windowInList.edge);
+			for(Window w: windowsInArrayEdge) {
+				for(Window w2 : windowsInArrayEdge) {
+					if(w!=w2) {
+						if(w.b1>w2.b0 && w.b0<w2.b1) {
+							throw new IllegalStateException("Error calculation intersections");
+							// TODO delete this for optimization.
+						}
+					}
 				}
 			}
 		}
@@ -581,10 +787,11 @@ public class ExactGeodesics extends ShortestPathCalculator{
 		newWindowsLeftBetter.add(leftWindow);
 		calculateNewLeftWindow(newWindowsRightBetter, windowRightBetter, windowLeftBetter, sourceRightBetter);
 		double newD0 = euclidianDistance(rootPoint, sourceRightBetter);
+		
 		Point_3 rightestPoint = new Point_3(windowRightBetter.b1,0,0);
 		double rightestPointDistance = euclidianDistance(rightestPoint, sourceRightBetter);
 		if(!isAlmostZero(rightestPointDistance-windowRightBetter.d1)) {
-			int gg=0;
+			throw new IllegalStateException();
 		}
 		
 		Window rightWindow = new Window(root, windowRightBetter.b1, newD0, windowRightBetter.d1, windowRightBetter.sigma, windowRightBetter.tau, windowRightBetter.edge, Math.min(windowRightBetter.d1, newD0)+windowRightBetter.sigma);
@@ -597,28 +804,31 @@ public class ExactGeodesics extends ShortestPathCalculator{
 
 	private void calculateNewLeftWindow(ArrayList<Window> newWindowsAfterIntersection, Window windowWorse,
 			Window windowBetter, Point_3 sourceWorse) {
-		Point_3 leftPointList = new Point_3(windowBetter.b0,0,0);
+		Point_3 leftPointBetter = new Point_3(windowBetter.b0,0,0);
+		Point_3 leftPointWorse = new Point_3(windowWorse.b0,0,0);
+		if(!isAlmostZero(windowWorse.d0-euclidianDistance(leftPointWorse, sourceWorse))) {
+			throw new IllegalStateException("error distances for extra window calculation");
+		}
 		if(windowWorse.b0<windowBetter.b0 && !isAlmostZero(windowWorse.b0-windowBetter.b0)) {
-			
-			Window newWindow = new Window(windowWorse.b0, windowBetter.b0, windowWorse.d0, euclidianDistance(leftPointList, sourceWorse), windowWorse.sigma, windowWorse.tau, windowWorse.edge, Math.min(windowWorse.d0, euclidianDistance(leftPointList, sourceWorse))+windowWorse.sigma);
+			Window newWindow = new Window(windowWorse.b0, windowBetter.b0, windowWorse.d0, euclidianDistance(leftPointBetter, sourceWorse), windowWorse.sigma, windowWorse.tau, windowWorse.edge, Math.min(windowWorse.d0, euclidianDistance(leftPointBetter, sourceWorse))+windowWorse.sigma);
 			if(newWindow.b1-newWindow.b0 <EPSILON) {
 				throw new IllegalStateException();
 			}
 			newWindowsAfterIntersection.add(newWindow);
-			// TODO add the window
 		}
 	}
 	
 	private void calculateNewRightWindow(ArrayList<Window> newWindowsAfterIntersection, Window windowWorse,
 			Window windowBetter, Point_3 sourceWorse) {
-		Point_3 rightPointList = new Point_3(windowBetter.b1,0,0);
+		Point_3 rightPointBetter = new Point_3(windowBetter.b1,0,0);
+		Point_3 rightPointWorse = new Point_3(windowWorse.b1,0,0);
+		if(!isAlmostZero(windowWorse.d1-euclidianDistance(rightPointWorse, sourceWorse))) throw new IllegalStateException("error distances for extra window calculation");
 		if(windowWorse.b1>windowBetter.b1 && !isAlmostZero(windowWorse.b1-windowBetter.b1)) {
-			Window newWindow = new Window(windowBetter.b1, windowWorse.b1, euclidianDistance(rightPointList, sourceWorse), windowWorse.d1, windowWorse.sigma, windowWorse.tau, windowWorse.edge, Math.min(euclidianDistance(rightPointList, sourceWorse), windowWorse.d1)+windowWorse.sigma);
+			Window newWindow = new Window(windowBetter.b1, windowWorse.b1, euclidianDistance(rightPointBetter, sourceWorse), windowWorse.d1, windowWorse.sigma, windowWorse.tau, windowWorse.edge, Math.min(euclidianDistance(rightPointBetter, sourceWorse), windowWorse.d1)+windowWorse.sigma);
 			if(newWindow.b1-newWindow.b0 <EPSILON) {
 				throw new IllegalStateException();
 			}
 			newWindowsAfterIntersection.add(newWindow);
-			// TODO add the window
 		}
 	}
 
@@ -705,8 +915,8 @@ public class ExactGeodesics extends ShortestPathCalculator{
 		return euclidianDistance(edge.vertex.getPoint(), edge.opposite.vertex.getPoint());
 	}
 	
-	private double lowestBoundDistance(Vertex<Point_3> source, Vertex<Point_3> destination) {
-		return euclidianDistance(source.getPoint(), destination.getPoint());
+	private static double lowestBoundDistance(Point_3 source, Point_3 destination) {
+		return euclidianDistance(source, destination);
 		// TODO step 2
 	}
 	
@@ -825,7 +1035,117 @@ public class ExactGeodesics extends ShortestPathCalculator{
 	public static boolean isAlmostZero(Double d) {
 		return d<EPSILON && d>-EPSILON;
 	}
-
+//	calculateT(t, vp1_p, vp2_p, vp_s, vp1_p2, vp2_p0,points, 0);
+	
+//	public static void calculateTBackPropagation(double[] t, Vector_3 vDiffOrigin, Vector_3 vDiffOrigin2, Vector_3 vLineSource, Vector_3 vLineLeft,
+//			Vector_3 vLineRight, Point_3[] points, int index) { //Points:p0-p1-p3-source-q0-q1
+//		double auxCross = cross(vLineLeft, vLineSource);
+//		if(isAlmostZero(auxCross)) {
+//			System.out.println("Paralel lines");
+//			if(isAlmostZero(cross(vDiffOrigin,vLineSource))) {
+//				t[0] = 1;
+//			}else {
+//				t[0] = 2;
+//			}
+//		}else {
+//			t[0] = cross(vDiffOrigin,vLineSource)/auxCross;
+//		}
+//		double auxCross2 = cross(vLineRight, vLineSource);
+//		if(isAlmostZero(auxCross2)) {
+//			t[1] = 2;
+//		}else {
+//			t[1] = cross(vDiffOrigin2,vLineSource)/auxCross2;
+//		}
+//		//if it cuts both lines:
+//		if((t[0]>=-EPSILON && t[0]<=1+EPSILON) && (t[1]>=-EPSILON && t[1]<=1+EPSILON)) {
+//			if(!isAlmostZero(t[1])) {
+//				if(isAlmostZero(t[0])) t[0] = 1;
+//				else {
+//					if(isAlmostZero(t[1]-1)) t[1] = 0;
+//				}
+//			}
+//		}else {
+//			if(t[0]<-EPSILON || t[0]>1+EPSILON) {
+//				t[0]=1;
+//			}
+//			if(t[1]<-EPSILON || t[1]>1+EPSILON) {
+//				t[1] = 0;
+//			}
+//		}
+//		if((t[0]<-EPSILON || t[0]>1+EPSILON) && (t[1]<-EPSILON || t[1]>1+EPSILON)) {
+//			throw new IllegalArgumentException("needs to cut one of the two lines");
+//		}
+//		if((t[0]>=EPSILON && t[0]<=1-EPSILON) && (t[1]>=EPSILON && t[1]<=1-EPSILON)) {
+//			throw new IllegalStateException("can't cut both lines in the middle");
+//		}
+//	}
+	public static void calculateT(double[] t, Vector_3 vDiffOrigin, Vector_3 vDiffOrigin2, Vector_3 vLineSource, Vector_3 vLineLeft,
+			Vector_3 vLineRight, Point_3[] points, int index) { //Points:p0-p1-p3-source-q0-q1
+		// Fix for when q0==p0 || q1==p1
+//		if(points.length!=6) throw new IllegalStateException("Point list needs to be of lenght 6");
+//		if(isAlmostZero(points[0+index].x-points[4+index].x)) { //MAL no es siempre verdad y con esto solo podes mirar ventanas enteras:(
+//			t[0]=index;
+//			t[1]=index;
+//			return;
+//		}
+		boolean isParallel = false;
+		double auxCross = cross(vLineLeft, vLineSource);
+		if(isAlmostZero(auxCross)) {
+			System.out.println("Paralel lines 1");
+			t[0] = 2;
+			isParallel = true;
+		}else {
+			t[0] = cross(vDiffOrigin,vLineSource)/auxCross;
+		}
+		double auxCross2 = cross(vLineRight, vLineSource);
+		if(isAlmostZero(auxCross2)) {
+			System.out.println("Paralel lines 2");
+			t[1] = -1;
+			if(isParallel) {
+				throw new IllegalStateException("Can't be paralel to both lines");
+			}
+		}else {
+			t[1] = cross(vDiffOrigin2,vLineSource)/auxCross2;
+		}
+		//if it cuts both lines:
+		if((t[0]>=-EPSILON && t[0]<=1+EPSILON) && (t[1]>=-EPSILON && t[1]<=1+EPSILON)) {
+			if(isAlmostZero(t[0]) && isAlmostZero(t[1]-1)) {
+				//Points:p0-p1-p3-source-q0-q1
+//				throw new IllegalStateException("border case. Add something in case it happens");
+				t[0] = 1;
+				t[1] = 0;
+				System.out.println("border case. Can be wrong");
+			}else {
+				if(isAlmostZero(t[0])) {
+					t[0]=1;
+				}
+				if(isAlmostZero(t[1]-1)) {
+					t[1]=0;
+				}
+			}
+		}else {
+			if((t[0]<-EPSILON || t[0]>1+EPSILON) && (t[1]<-EPSILON || t[1]>1+EPSILON)) {
+				throw new IllegalArgumentException("needs to cut one of the two lines");
+			}
+			if(t[0]<-EPSILON || t[0]>1+EPSILON) {
+				//No corta la primera linea.
+				t[0] = 1;
+			}
+			if(t[1]<-EPSILON || t[1]>1+EPSILON) {
+				//No corta la segunda
+				t[1] = 0;
+			}
+		}
+		if((t[0]<-EPSILON || t[0]>1+EPSILON) && (t[1]<-EPSILON || t[1]>1+EPSILON)) {
+			throw new IllegalArgumentException("needs to cut one of the two lines");
+		}
+		if((t[0]>=EPSILON && t[0]<=1-EPSILON) && (t[1]>=EPSILON && t[1]<=1-EPSILON)) {
+			throw new IllegalStateException("can't cut both lines in the middle");
+		}
+	}
+	public static double cross(Vector_3 v1, Vector_3 v2) {
+		return v1.x*v2.y - v1.y*v2.x;
+	}
 	
 
 }

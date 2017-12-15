@@ -165,7 +165,7 @@ public class SurfaceMesh {
 			}
 			view.noStroke();
 			this.drawVertex(s.getPoint(),0f,250f,0f);
-			this.drawVertex(d.getPoint(),0f,250f,0f);
+			this.drawVertex(d.getPoint(),250f,0f,0f);
 			view.strokeWeight(1);
 		}
 	}
